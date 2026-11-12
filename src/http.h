@@ -13,6 +13,8 @@ struct Response {
     int status = 0;                    // 0: couldn't connect
     std::string contentType;
     std::string body;
+    int64_t length = -1;               // Content-Length, when the server sent one
+    int64_t received = 0;              // bytes that came
 };
 
 Response get(const std::string& url);

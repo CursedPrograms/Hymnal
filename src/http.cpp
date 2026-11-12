@@ -41,7 +41,7 @@ static bool parse(const std::string& url, Url& u) {
 
 // one request; follows redirects (Hugging Face sends its files from a CDN); body read in full, or streamed to sink
 static Response request(const std::string& method, const std::string& url, const std::string& contentType, const std::string& body,
-                        std::function<bool(const char*, size_t, int64_t)> sink = nullptr) {
+                        std::function<bool(const char*, size_t, int64_t)> sink = nullptr, int64_t from = 0) {
     Response r;
     Url u;
     if (!parse(url, u)) return r;
@@ -56,6 +56,7 @@ static Response request(const std::string& method, const std::string& url, const
         WinHttpSetOption(q, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof redirect);
         std::wstring headers;
         if (!contentType.empty()) headers = L"Content-Type: " + widen(contentType) + L"\r\n";
+        if (from > 0) headers += L"Range: bytes=" + std::to_wstring(from) + L"-\r\n";   // carrying on a download
         if (WinHttpSendRequest(q, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(), (DWORD)-1L,
                                body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data(), (DWORD)body.size(), (DWORD)body.size(), 0) &&
             WinHttpReceiveResponse(q, nullptr)) {
@@ -68,10 +69,12 @@ static Response request(const std::string& method, const std::string& url, const
             int64_t total = -1;
             wchar_t cl[64]; len = sizeof cl;
             if (WinHttpQueryHeaders(q, WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX, cl, &len, WINHTTP_NO_HEADER_INDEX)) total = _wtoi64(cl);
+            r.length = total;
             std::vector<char> buf(1 << 16);
             for (;;) {
                 DWORD got = 0;
                 if (!WinHttpReadData(q, buf.data(), (DWORD)buf.size(), &got) || got == 0) break;
+                r.received += got;
                 if (sink) { if (!sink(buf.data(), got, total)) { r.status = -1; break; } }
                 else r.body.append(buf.data(), got);
             }
@@ -83,7 +86,7 @@ static Response request(const std::string& method, const std::string& url, const
     return r;
 }
 #else
-static Response request(const std::string&, const std::string&, const std::string&, const std::string&, std::function<bool(const char*, size_t, int64_t)> = nullptr) { return {}; }
+static Response request(const std::string&, const std::string&, const std::string&, const std::string&, std::function<bool(const char*, size_t, int64_t)> = nullptr, int64_t = 0) { return {}; }
 #endif
 
 Response get(const std::string& url) { return request("GET", url, "", ""); }
@@ -105,32 +108,52 @@ Response postMultipart(const std::string& url, const std::vector<Part>& parts) {
 }
 
 bool download(const std::string& url, const std::string& dest, std::function<void(int64_t, int64_t)> progress, std::atomic<bool>* stop, std::string& err) {
+    // into dest.part, carrying on from whatever is already there; moved into place only once every byte has come.
+    // A dropped connection is tried again (from where it broke) a few times before giving up.
     std::error_code ec;
     fs::create_directories(fs::u8path(dest).parent_path(), ec);
     const std::string part = dest + ".part";
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        if (stop && *stop) { err = "Stopped"; return false; }
+        int64_t have = fs::exists(fs::u8path(part), ec) ? (int64_t)fs::file_size(fs::u8path(part), ec) : 0;
 #ifdef _WIN32
-    FILE* f = _wfopen(fs::u8path(part).wstring().c_str(), L"wb");
+        FILE* f = _wfopen(fs::u8path(part).wstring().c_str(), have > 0 ? L"ab" : L"wb");
 #else
-    FILE* f = fopen(part.c_str(), "wb");
+        FILE* f = fopen(part.c_str(), have > 0 ? "ab" : "wb");
 #endif
-    if (!f) { err = "Can't write " + part; return false; }
-    int64_t done = 0;
-    const Response r = request("GET", url, "", "", [&](const char* d, size_t n, int64_t total) {
-        if (stop && *stop) return false;
-        if (fwrite(d, 1, n, f) != n) return false;
-        done += (int64_t)n;
-        if (progress) progress(done, total);
+        if (!f) { err = "Can't write " + part; return false; }
+        int64_t done = have, whole = -1;
+        bool restarted = false;
+        const Response r = request("GET", url, "", "", [&](const char* d, size_t n, int64_t total) {
+            if (stop && *stop) return false;
+            if (whole < 0) whole = total < 0 ? -1 : total + done;
+            if (fwrite(d, 1, n, f) != n) return false;
+            done += (int64_t)n;
+            if (progress) progress(done, whole);
+            return true;
+        }, have);
+        // the server ignored the range and sent the whole file: start the part over
+        if (r.status == 200 && have > 0) { fclose(f); f = nullptr; fs::remove(fs::u8path(part), ec); restarted = true; }
+        if (f) fclose(f);
+        if (restarted) continue;
+        if (r.status == 416) {   // asked for bytes past the end: the part is already whole
+            fs::rename(fs::u8path(part), fs::u8path(dest), ec);
+            if (ec) { err = "Can't move it into place: " + ec.message(); return false; }
+            return true;
+        }
+        if (r.status == -1) { err = "Stopped"; return false; }
+        if (r.status != 200 && r.status != 206) {
+            if (r.status == 0 && attempt < 7) continue;   // no connection: try again
+            err = r.status == 0 ? "Couldn't connect" : "HTTP " + std::to_string(r.status);
+            return false;
+        }
+        if (r.length >= 0 && r.received < r.length) continue;   // broke off part-way: carry on from here
+        fs::rename(fs::u8path(part), fs::u8path(dest), ec);
+        if (ec) { err = "Can't move it into place: " + ec.message(); return false; }
         return true;
-    });
-    fclose(f);
-    if (r.status != 200) {
-        fs::remove(fs::u8path(part), ec);
-        err = r.status == -1 ? "Stopped" : r.status == 0 ? "Couldn't connect" : "HTTP " + std::to_string(r.status);
-        return false;
     }
-    fs::rename(fs::u8path(part), fs::u8path(dest), ec);
-    if (ec) { err = "Can't move it into place: " + ec.message(); return false; }
-    return true;
+    err = "The download kept breaking off: try again later (it carries on from where it stopped)";
+    return false;
 }
 
 std::vector<MixedPart> splitMixed(const Response& r) {
