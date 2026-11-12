@@ -14,6 +14,7 @@ void setModelsDir(const std::string& dir);
 std::string logPath();
 
 bool start(std::string& err);                      // (re)starts it if it isn't answering
+bool hasCuda();                                    // an NVIDIA card: the CUDA engine, else the CPU one
 bool alive();                                      // the engine's process hasn't ended (crashed)
 bool running();                                    // /health answers
 void stop();

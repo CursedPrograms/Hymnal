@@ -1,0 +1,22 @@
+Hymnal
+Copyright (c) 2026 Cursed Entertainment. MIT License (see LICENSE).
+
+Hymnal runs and ships the following, under their own licences:
+
+acestep.cpp (engine\cuda and engine\cpu: ace-server and the ggml libraries) - ServeurpersoCom
+  https://github.com/ServeurpersoCom/acestep.cpp - MIT License
+ggml - the ggml authors - https://github.com/ggml-org/ggml - MIT License
+
+ACE-Step 1.5, the models (downloaded by the Models tab, not in this repository or the release)
+  ACE Studio and StepFun - https://github.com/ace-step/ACE-Step-1.5 - Apache License 2.0
+  GGUF conversions: https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF
+  The text encoder is Qwen3-Embedding-0.6B (Alibaba Cloud, Apache License 2.0).
+
+NVIDIA CUDA runtime libraries (engine\cuda: cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll), redistributed
+  under the NVIDIA CUDA Toolkit End User License Agreement - https://docs.nvidia.com/cuda/eula/
+
+Microsoft Visual C++ runtime (vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll), redistributable under the
+  Visual Studio licence.
+
+SDL2 - https://www.libsdl.org - zlib License
+Dear ImGui - Omar Cornut - https://github.com/ocornut/imgui - MIT License

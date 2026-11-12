@@ -42,8 +42,10 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 #endif
 
 namespace fs = std::filesystem;
@@ -119,6 +121,26 @@ static std::string fileDialog(bool save, const char* filter, const char* defExt,
     return "";
 #endif
 }
+// a folder, picked with Windows' own folder dialog
+static std::string pickFolder(const wchar_t* title) {
+    std::string r;
+#ifdef _WIN32
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    IFileOpenDialog* d = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d)))) return r;
+    DWORD opt = 0; d->GetOptions(&opt); d->SetOptions(opt | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    d->SetTitle(title);
+    if (SUCCEEDED(d->Show(nullptr))) {
+        IShellItem* it = nullptr;
+        if (SUCCEEDED(d->GetResult(&it))) { PWSTR p = nullptr; if (SUCCEEDED(it->GetDisplayName(SIGDN_FILESYSPATH, &p))) { r = fs::path(p).u8string(); CoTaskMemFree(p); } it->Release(); }
+    }
+    d->Release();
+#else
+    (void)title;
+#endif
+    return r;
+}
+
 static const char* AUDIO = "Audio|*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aac|All files|*.*|";
 
 static bool readBytes(const std::string& path, std::string& out) {
@@ -751,6 +773,17 @@ static void modelsTab() {
         ShellExecuteW(nullptr, L"open", fs::u8path(Engine::modelsDir()).wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 #endif
     }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Change...")) {
+        // another folder (a bigger drive): the models already there are used; the engine restarts to see them
+        const std::string f = pickFolder(L"Where Hymnal keeps its models");
+        if (!f.empty()) {
+            Engine::setModelsDir(f);
+            queue([] { Engine::stop(); refreshModels(); });
+            say("Models now kept in " + f + " (move any you have there, or get them again)");
+        }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Keep the models somewhere else, such as a bigger drive");
     std::vector<int> starter;
     for (size_t i = 0; i < Catalog::models().size(); ++i) if (Catalog::models()[i].starter && !haveModel(Catalog::models()[i].file)) starter.push_back((int)i);
     if (!starter.empty()) {

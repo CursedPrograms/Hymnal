@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -67,6 +68,26 @@ void setModelsDir(const std::string& dir) {
 
 std::string logPath() { return appData() + "/hymnal/engine.log"; }
 
+// an NVIDIA card the CUDA engine can use (asked of the driver itself: no CUDA install needed)
+bool hasCuda() {
+#ifdef _WIN32
+    static int known = -1;
+    if (known >= 0) return known == 1;
+    known = 0;
+    HMODULE cu = LoadLibraryW(L"nvcuda.dll");
+    if (!cu) return false;
+    using InitFn = int(__stdcall*)(unsigned);
+    using CountFn = int(__stdcall*)(int*);
+    auto init = (InitFn)GetProcAddress(cu, "cuInit");
+    auto count = (CountFn)GetProcAddress(cu, "cuDeviceGetCount");
+    int n = 0;
+    if (init && count && init(0) == 0 && count(&n) == 0 && n > 0) known = 1;
+    return known == 1;
+#else
+    return false;
+#endif
+}
+
 std::string serverExe() {
     std::error_code ec;
 #ifdef _WIN32
@@ -75,8 +96,12 @@ std::string serverExe() {
     const char* name = "ace-server";
 #endif
     const fs::path here = fs::u8path(exeDir());
-    for (const fs::path& p : {here / "engine" / name, here / name, fs::path("D:/cc/_src/acestep.cpp/build-cuda") / name,
-                              fs::path("D:/cc/_src/acestep.cpp/build") / name, fs::path("D:/cc/_src/acestep.cpp/build/Release") / name})
+    // installed: engine\cuda (NVIDIA cards) and engine\cpu (any PC); while developing, the builds in _src
+    std::vector<fs::path> tries;
+    if (hasCuda()) tries = {here / "engine" / "cuda" / name, fs::path("D:/cc/_src/acestep.cpp/build-cuda") / name};
+    for (const fs::path& p : {here / "engine" / "cpu" / name, here / "engine" / name, here / name, fs::path("D:/cc/_src/acestep.cpp/build-cpu") / name})
+        tries.push_back(p);
+    for (const auto& p : tries)
         if (fs::exists(p, ec)) return p.u8string();
     return "";
 }
