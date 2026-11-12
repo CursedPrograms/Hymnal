@@ -5,6 +5,7 @@
 //
 //   Hymnal [audio file]
 //   Hymnal --capture out.bmp [--tab N]      a screenshot from a hidden window, then quit
+//   Hymnal --song "style" [--seconds N]      make a song straight away (the songwriter writes the words)
 #include "audio.h"
 #include "catalog.h"
 #include "engine.h"
@@ -134,12 +135,32 @@ static bool readBytes(const std::string& path, std::string& out) {
     return ok;
 }
 
+// a folder Hymnal can really write to: Music\Hymnal, unless Windows guards Music (Controlled folder access) - then
+// Hymnal in the user's own folder. Tried once, by writing a file.
+static bool canWrite(const fs::path& d) {
+    std::error_code ec;
+    fs::create_directories(d, ec);
+    const fs::path t = d / ".hymnal-write-test";
+    FILE* f = _wfopen(t.wstring().c_str(), L"wb");
+    if (!f) return false;
+    fclose(f); fs::remove(t, ec);
+    return true;
+}
 static std::string songsDir() {
+    static std::string dir;
+    if (!dir.empty()) return dir;
 #ifdef _WIN32
     PWSTR p = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Music, 0, nullptr, &p))) { std::string r = (fs::path(p) / "Hymnal").u8string(); CoTaskMemFree(p); return r; }
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Music, 0, nullptr, &p))) {
+        const fs::path m = fs::path(p) / "Hymnal"; CoTaskMemFree(p);
+        if (canWrite(m)) return dir = m.u8string();
+    }
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &p))) {
+        const fs::path m = fs::path(p) / "Hymnal"; CoTaskMemFree(p);
+        if (canWrite(m)) return dir = m.u8string();
+    }
 #endif
-    return "Hymnal";
+    return dir = "Hymnal";
 }
 
 // ---------- the settings: everything is a slider (or a choice) ----------
@@ -227,6 +248,11 @@ static bool waitJob(const std::string& id, const std::string& what, std::string&
         if (s == Engine::S_DONE) break;
         if (s == Engine::S_FAILED) { err = what + " failed (the engine's log: " + Engine::logPath() + ")"; return false; }
         if (s == Engine::S_CANCELLED) { err = "Stopped"; return false; }
+        if (s == Engine::S_UNKNOWN && !Engine::alive()) {   // it crashed: say so instead of waiting for ever
+            { std::lock_guard<std::mutex> g(mtx); runningJob.clear(); }
+            err = "The engine stopped (it may have run out of graphics memory: close other apps using the GPU). Try again: it restarts by itself.";
+            return false;
+        }
         char m[200]; snprintf(m, sizeof m, "%s... %.0f s", what.c_str(), now() - t0);
         say(m);
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
@@ -268,7 +294,7 @@ static void collect(const Http::Response& r, const std::vector<Json::Value>& met
         std::error_code ec;
         fs::create_directories(fs::u8path(songsDir()), ec);
         s.path = (fs::u8path(songsDir()) / fs::u8path(safeName(s.title) + " " + stamp() + (n ? "-" + std::to_string(n) : "") + ".wav")).u8string();
-        Audio::saveWav(s.path, s.clip, 16, err);
+        if (!Audio::saveWav(s.path, s.clip, 16, err)) say("Couldn't save the song: " + err + " (" + s.path + ")");
         Audio::overview(s.clip, 600, s.lo, s.hi);
         ++n;
         post([s] { songs.insert(songs.begin(), s); current = 0; });
@@ -346,6 +372,7 @@ static void createSong() {
             // (later keys win in the engine's reader; these are ours)
             sw.i("inference_steps", s.steps).f("guidance_scale", s.guidance).f("shift", s.shift).s("solver", SOLVERS[s.solver]);
             sw.s("output_format", "wav16").f("peak_clip", s.peakClip);
+            if (s.duration > 0) sw.f("duration", s.duration);   // the length slider wins over the songwriter's idea
             const std::string dit = modelName(engineModels.dit, s.songModel);
             if (!dit.empty()) sw.s("synth_model", dit);
             std::string sid;
@@ -965,6 +992,8 @@ static void frame() {
     about();
 }
 
+static std::string songPrompt; static int songSeconds = 0;
+
 int main(int argc, char** argv) {
     std::string capture, file;
     std::vector<std::string> args;
@@ -977,6 +1006,8 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--capture" && i + 1 < args.size()) capture = args[++i];
         else if (args[i] == "--tab" && i + 1 < args.size()) forcedTab = atoi(args[++i].c_str());
+        else if (args[i] == "--song" && i + 1 < args.size()) songPrompt = args[++i];
+        else if (args[i] == "--seconds" && i + 1 < args.size()) songSeconds = atoi(args[++i].c_str());
         else file = args[i];
     }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) return 1;
@@ -1030,6 +1061,13 @@ int main(int argc, char** argv) {
         ready = true;
     });
     if (!file.empty()) loadSource(file);
+    if (!songPrompt.empty()) {   // after the engine's start job (the queue runs in order)
+        snprintf(st.caption, sizeof st.caption, "%s", songPrompt.c_str());
+        st.lyricsMode = LY_WRITE;
+        if (songSeconds > 0) st.duration = songSeconds;
+        createSong();
+        forcedTab = 0;
+    }
     if (splashWin) {
         const Uint32 start = SDL_GetTicks();
         bool skip = false;

@@ -105,7 +105,8 @@ bool start(std::string& err) {
     STARTUPINFOW si{}; si.cb = sizeof si;
     si.dwFlags = STARTF_USESTDHANDLES; si.hStdOutput = log; si.hStdError = log; si.hStdInput = nullptr;
     PROCESS_INFORMATION pi{};
-    std::wstring cmd = L"\"" + fs::u8path(exe).wstring() + L"\" --models \"" + fs::u8path(modelsDir()).wstring() + L"\" --port " + std::to_wstring(PORT) + L" --host 127.0.0.1";
+    std::wstring cmd = L"\"" + fs::u8path(exe).wstring() + L"\" --models \"" + fs::u8path(modelsDir()).wstring() + L"\" --port " + std::to_wstring(PORT) + L" --host 127.0.0.1"
+        L" --vae-chunk 256";   // the audio decoded in smaller pieces: room to spare on a 6 GB graphics card
     const std::wstring dir = fs::u8path(exe).parent_path().wstring();
     const BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, dir.c_str(), &si, &pi);
     if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
@@ -174,6 +175,14 @@ bool submitAudio(const char* endpoint, const std::string& json, const std::strin
     parts.push_back({"audio", audioName, type(audioName), audio});
     if (!refAudio.empty()) parts.push_back({"ref_audio", audioName, type(audioName), refAudio});
     return jobId(Http::postMultipart(url() + endpoint, parts), id, err);
+}
+
+bool alive() {
+#ifdef _WIN32
+    return process && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+#else
+    return true;
+#endif
 }
 
 Status poll(const std::string& id) {
