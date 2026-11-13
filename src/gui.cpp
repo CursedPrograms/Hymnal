@@ -57,8 +57,8 @@ namespace fs = std::filesystem;
 // ---------- the Atelier look: greys, the Cursed pink; solid, no gradients, no shadows ----------
 static const ImU32 C_BG = IM_COL32(0x1a, 0x1a, 0x1a, 255), C_PANEL = IM_COL32(0x24, 0x24, 0x24, 255),
                    C_LINE = IM_COL32(0x3a, 0x3a, 0x3a, 255), C_TEXT = IM_COL32(0xe6, 0xe6, 0xe6, 255),
-                   C_DIM = IM_COL32(0x9a, 0x9a, 0x9a, 255), C_PINK = IM_COL32(0xe0, 0x40, 0x8a, 255),
-                   C_DEEP = IM_COL32(0xc2, 0x18, 0x6b, 255), C_WELL = IM_COL32(0x14, 0x14, 0x14, 255);
+                   C_DIM = IM_COL32(0x9a, 0x9a, 0x9a, 255), C_PINK = IM_COL32(0x00, 0x7b, 0xb7, 255),
+                   C_DEEP = IM_COL32(0x00, 0x51, 0x84, 255), C_WELL = IM_COL32(0x14, 0x14, 0x14, 255);
 static ImVec4 col4(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 
 static void applyStyle() {
@@ -943,6 +943,31 @@ static void playerBar(ImVec2 pos, ImVec2 size) {
     ImGui::PopStyleColor();
 }
 
+// working: the fraction done when it's known, else a block that sweeps along the bar (so it never looks stuck)
+static void busyBar() {
+    static double since = 0; static int last = -10;   // when this run started: the bar wasn't drawn last frame
+    if (ImGui::GetFrameCount() - last > 1) since = ImGui::GetTime();
+    last = ImGui::GetFrameCount();
+    const float w = ImGui::GetContentRegionAvail().x, h = 18;
+    const ImVec2 a = ImGui::GetCursorScreenPos(), z(a.x + w, a.y + h);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    d->AddRectFilled(a, z, C_WELL, 3);
+    const float f = progress;
+    if (f >= 0) d->AddRectFilled(a, ImVec2(a.x + w * std::clamp(f, 0.0f, 1.0f), z.y), C_PINK, 3);
+    else {
+        const float bw = w * 0.22f, t = (float)fmod(ImGui::GetTime() * 0.6, 1.0);
+        const float x0 = a.x - bw + (w + bw) * t;
+        d->AddRectFilled(ImVec2(std::max(a.x, x0), a.y), ImVec2(std::min(z.x, x0 + bw), z.y), C_PINK, 3);
+    }
+    const double secs = ImGui::GetTime() - since;
+    char t[64];
+    if (f >= 0) snprintf(t, sizeof t, "%.0f%%   %d:%02d", f * 100, (int)secs / 60, (int)secs % 60);
+    else snprintf(t, sizeof t, "working   %d:%02d", (int)secs / 60, (int)secs % 60);
+    const ImVec2 ts = ImGui::CalcTextSize(t);
+    d->AddText(ImVec2(a.x + (w - ts.x) / 2, a.y + (h - ts.y) / 2), C_TEXT, t);
+    ImGui::Dummy(ImVec2(w, h + 4));
+}
+
 static void menuBar() {
     if (!ImGui::BeginMainMenuBar()) return;
     if (ImGui::BeginMenu("File")) {
@@ -993,9 +1018,9 @@ static void frame() {
     if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Space) && current >= 0) { Song& s = songs[current]; if (playClip == &s.clip) playing = !playing; else play(&s.clip, true); }
     menuBar();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float top = ImGui::GetFrameHeight(), side = 280, right = 300, player = 120;
-    songsPanel(ImVec2(vp->Pos.x, vp->Pos.y + top), ImVec2(side, vp->Size.y - top - player));
-    settingsPanel(ImVec2(vp->Pos.x + vp->Size.x - right, vp->Pos.y + top), ImVec2(right, vp->Size.y - top - player));
+    const float top = ImGui::GetFrameHeight(), side = 300, right = 280, player = 120;   // the controls left, your songs right
+    settingsPanel(ImVec2(vp->Pos.x, vp->Pos.y + top), ImVec2(side, vp->Size.y - top - player));
+    songsPanel(ImVec2(vp->Pos.x + vp->Size.x - right, vp->Pos.y + top), ImVec2(right, vp->Size.y - top - player));
     playerBar(ImVec2(vp->Pos.x, vp->Pos.y + vp->Size.y - player), ImVec2(vp->Size.x, player));
     ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + side, vp->Pos.y + top));
     ImGui::SetNextWindowSize(ImVec2(vp->Size.x - side - right, vp->Size.y - top - player));
@@ -1015,9 +1040,10 @@ static void frame() {
         forcedTab = -1;
         ImGui::EndTabBar();
     }
-    // the status line, and Stop while something runs
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 34);
+    // the status line, and while something runs: a busy bar and Stop
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - (busy ? 62 : 34));
     ImGui::Separator();
+    if (busy) busyBar();
     if (busy) { if (ImGui::SmallButton("Stop")) stopJob = true; ImGui::SameLine(); }
     { std::lock_guard<std::mutex> g(mtx); ImGui::TextDisabled("%s", status.c_str()); }
     ImGui::End();

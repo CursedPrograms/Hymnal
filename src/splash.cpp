@@ -20,7 +20,7 @@ void setFonts(ImFont* title, ImFont* small) { titleFont = title; smallFont = sma
 
 static const ImU32 BG = IM_COL32(0x1a, 0x1a, 0x1a, 255), LINE = IM_COL32(0x33, 0x33, 0x33, 255),
                    TEXT = IM_COL32(0xd6, 0xd6, 0xd6, 255), DIM = IM_COL32(0x9a, 0x9a, 0x9a, 255),
-                   PINK = IM_COL32(0xe0, 0x40, 0x8a, 255), DEEP = IM_COL32(0x9e, 0x3a, 0x6a, 255),
+                   PINK = IM_COL32(0x00, 0x7b, 0xb7, 255), DEEP = IM_COL32(0x00, 0x40, 0x67, 255),
                    DARK = IM_COL32(0x3a, 0x3a, 0x3a, 255), MID = IM_COL32(0x55, 0x55, 0x55, 255);
 
 static void text(ImDrawList* dl, ImFont* f, float size, ImVec2 p, ImU32 col, const char* s) {
