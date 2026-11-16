@@ -57,6 +57,16 @@ Cursed Entertainment's creative suite. **[Website](https://cursedprograms.github
 - **Any PC:** a CUDA engine for NVIDIA graphics cards (a 30-second song takes about 30 seconds on an RTX 2060) and
   a CPU engine for every other PC, picked for you.
 
+## Minimum requirements
+
+| | |
+| --- | --- |
+| **System** | Windows 10 or 11, 64-bit (Linux builds from source) |
+| **Processor** | any 64-bit processor |
+| **Memory** | 8 GB RAM (16 GB recommended) |
+| **Graphics** | any graphics card with OpenGL 3.0; an NVIDIA card makes songs far faster (about real time on an RTX 2060), every other PC uses the CPU engine |
+| **Disk** | about 6 GB: 1 GB for the app and 5 GB for the starter models (stems need 1.4 to 1.9 GB more) |
+
 ## Download and run
 
 Windows: download **Hymnal-win64.zip** from [Releases](https://github.com/CursedPrograms/Hymnal/releases), unzip it
