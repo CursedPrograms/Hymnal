@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Hymnal VERSION 1.0.0 LANGUAGES C CXX)
+project(Hymnal VERSION 1.1.0 LANGUAGES C CXX)
 # Hymnal: whole songs, with vocals, from a style and your lyrics; covers, remixes, stems, key and tempo. Part of Atelier.
 # The engine is acestep.cpp's ace-server (ACE-Step 1.5 in C++ on ggml, MIT), run by Hymnal; build it with build.bat.
 set(CMAKE_CXX_STANDARD 17)
